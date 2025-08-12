@@ -3,20 +3,14 @@ import { useEffect, useState } from "react";
 const Questions = () => {
   const [questions, setQuestions] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [currentQIndex, setCurrentQIndex] = useState(0);
-  const [selectedAnswer, setSelectedAnswer] = useState(null);
+  const [currentIndex, setCurrentIndex] = useState(0);
   const [score, setScore] = useState(0);
-  const [showScore, setShowScore] = useState(false);
+  const [showResults, setShowResults] = useState(false);
 
   const multipleType =
     "https://opentdb.com/api.php?amount=10&category=18&difficulty=medium&type=multiple";
 
-  const decodeHtml = (html) => {
-    const txt = document.createElement("textarea");
-    txt.innerHTML = html;
-    return txt.value;
-  };
-
+  // Fetch or load from localStorage
   useEffect(() => {
     const savedQuestions = localStorage.getItem("quizQuestions");
 
@@ -26,23 +20,23 @@ const Questions = () => {
         if (Array.isArray(parsed) && parsed.length > 0) {
           setQuestions(parsed);
           setLoading(false);
-          return;
-        } else {
-          localStorage.removeItem("quizQuestions");
+          return; // stop here, no fetch needed
         }
-      } catch {
-        localStorage.removeItem("quizQuestions");
+      } catch (err) {
+        console.warn("Saved questions are invalid, refetching...");
       }
     }
 
+    // If no saved or invalid, fetch from API
     const fetchData = async () => {
       try {
         const res = await fetch(multipleType);
-        const data = await res.json();
-        if (Array.isArray(data.results) && data.results.length > 0) {
-          setQuestions(data.results);
-          localStorage.setItem("quizQuestions", JSON.stringify(data.results));
+        if (res.status === 429) {
+          throw new Error("Too many requests — try again later");
         }
+        const data = await res.json();
+        setQuestions(data.results);
+        localStorage.setItem("quizQuestions", JSON.stringify(data.results));
       } catch (err) {
         console.error("Error fetching questions:", err);
       } finally {
@@ -52,120 +46,110 @@ const Questions = () => {
     fetchData();
   }, []);
 
-  const handleAnswerClick = (option) => {
-    if (selectedAnswer) return;
-    setSelectedAnswer(option);
-
-    if (option === questions[currentQIndex].correct_answer) {
+  const handleAnswer = (answer) => {
+    const correctAnswer = questions[currentIndex].correct_answer;
+    if (answer === correctAnswer) {
       setScore((prev) => prev + 1);
     }
-  };
 
-  const handleNext = () => {
-    if (currentQIndex + 1 < questions.length) {
-      setCurrentQIndex((prev) => prev + 1);
-      setSelectedAnswer(null);
+    if (currentIndex + 1 < questions.length) {
+      setCurrentIndex((prev) => prev + 1);
     } else {
-      setShowScore(true);
+      setShowResults(true);
     }
   };
 
   const handleRestart = () => {
-    setShowScore(false);
-    setCurrentQIndex(0);
-    setScore(0);
-    setSelectedAnswer(null);
     localStorage.removeItem("quizQuestions");
-    window.location.reload();
+    setQuestions([]);
+    setCurrentIndex(0);
+    setScore(0);
+    setShowResults(false);
+    setLoading(true);
+    // Re-fetch
+    const fetchData = async () => {
+      const res = await fetch(multipleType);
+      const data = await res.json();
+      setQuestions(data.results);
+      localStorage.setItem("quizQuestions", JSON.stringify(data.results));
+      setLoading(false);
+    };
+    fetchData();
   };
 
-  if (loading) {
-    return <p className="text-center text-lg font-medium">Loading questions...</p>;
-  }
+  if (loading) return <p className="text-center text-lg mt-10">Loading...</p>;
 
-  if (showScore) {
+  // If no questions (e.g., API 429 or fetch error)
+  if (!questions || questions.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-br from-pink-200 via-purple-200 to-blue-200">
-        <div className="bg-white p-8 rounded-xl shadow-lg text-center animate-fadeIn">
-          <h2 className="text-3xl font-bold mb-4 text-purple-700">Quiz Completed 🎉</h2>
-          <p className="text-lg mb-6">
-            Your Score: <span className="font-semibold text-purple-600">{score}</span> / {questions.length}
-          </p>
-          <button
-            onClick={handleRestart}
-            className="px-6 py-3 bg-gradient-to-r from-pink-500 to-purple-500 text-white rounded-lg shadow-lg hover:scale-105 transition-transform duration-300"
-          >
-            Restart Quiz
-          </button>
-        </div>
+      <div className="text-center mt-20">
+        <h2 className="text-2xl font-bold mb-4 text-red-500">
+          😢 No questions available
+        </h2>
+        <p className="mb-6">
+          The quiz server might be busy (429 error). Please try again in a
+          minute.
+        </p>
+        <button
+          onClick={() => window.location.reload()}
+          className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+        >
+          Retry
+        </button>
       </div>
     );
   }
 
-  const currentQuestion = questions[currentQIndex];
-  const correctAnswer = currentQuestion.correct_answer;
-  const answers = [...currentQuestion.incorrect_answers, correctAnswer].sort(
-    () => Math.random() - 0.5
-  );
+  if (showResults) {
+    return (
+      <div className="text-center mt-20">
+        <h2 className="text-3xl font-bold mb-4">Quiz Completed! 🎉</h2>
+        <p className="text-xl mb-6">
+          You scored <span className="font-bold">{score}</span> out of{" "}
+          {questions.length}
+        </p>
+        <button
+          onClick={handleRestart}
+          className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+        >
+          Restart Quiz
+        </button>
+      </div>
+    );
+  }
+
+  const currentQuestion = questions[currentIndex];
+  const answers = [
+    ...currentQuestion.incorrect_answers,
+    currentQuestion.correct_answer,
+  ].sort(() => Math.random() - 0.5);
+
+  const progress = ((currentIndex + 1) / questions.length) * 100;
 
   return (
-    <div className="flex flex-col items-center min-h-screen bg-gradient-to-br from-pink-200 via-purple-200 to-blue-200 p-6">
-      <div className="bg-white p-6 rounded-2xl shadow-lg w-full max-w-2xl animate-fadeIn">
-        <h3 className="text-xl font-semibold text-purple-700 mb-4">
-          {decodeHtml(currentQuestion.question)}
-        </h3>
+    <div className="max-w-2xl mx-auto mt-10 p-4">
+      {/* Progress Bar */}
+      <div className="w-full bg-gray-300 rounded-full h-4 mb-6">
+        <div
+          className="bg-green-500 h-4 rounded-full transition-all duration-500"
+          style={{ width: `${progress}%` }}
+        ></div>
+      </div>
 
-        <ul className="space-y-3">
-          {answers.map((option, idx) => {
-            const isSelected = selectedAnswer === option;
-            const isCorrect = option === correctAnswer;
+      {/* Question */}
+      <h2 className="text-xl font-bold mb-4">{currentQuestion.question}</h2>
 
-            let optionClasses =
-              "p-3 rounded-lg cursor-pointer transition-all duration-300 transform ";
-
-            if (selectedAnswer) {
-              if (isSelected && isCorrect) {
-                optionClasses += "bg-green-500 text-white scale-105 shadow-lg";
-              } else if (isSelected && !isCorrect) {
-                optionClasses += "bg-red-500 text-white animate-shake";
-              } else if (isCorrect) {
-                optionClasses += "bg-green-300 text-black";
-              } else {
-                optionClasses += "bg-gray-200 text-gray-700";
-              }
-            } else {
-              optionClasses +=
-                "bg-gray-200 hover:bg-purple-500 hover:text-white hover:scale-105";
-            }
-
-            return (
-              <li
-                key={idx}
-                className={optionClasses}
-                onClick={() => handleAnswerClick(option)}
-              >
-                {decodeHtml(option)}
-              </li>
-            );
-          })}
-        </ul>
-
-        <div className="flex justify-between items-center mt-6">
-          <p className="text-gray-600">
-            Question {currentQIndex + 1} / {questions.length}
-          </p>
+      {/* Answers */}
+      <div className="grid gap-3">
+        {answers.map((ans, idx) => (
           <button
-            onClick={handleNext}
-            disabled={!selectedAnswer}
-            className={`px-6 py-2 rounded-lg shadow-lg transition-all duration-300 ${
-              selectedAnswer
-                ? "bg-gradient-to-r from-pink-500 to-purple-500 text-white hover:scale-105"
-                : "bg-gray-300 text-gray-500 cursor-not-allowed"
-            }`}
+            key={idx}
+            onClick={() => handleAnswer(ans)}
+            className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition"
           >
-            {currentQIndex + 1 === questions.length ? "Finish" : "Next"}
+            {ans}
           </button>
-        </div>
+        ))}
       </div>
     </div>
   );
